@@ -40,7 +40,7 @@ def sparsity_concentration_index(coef, class_masks):
 
 def residual_ratio_score(residuals):
     """
-    Another confidence score: 1 - r_best / r_second
+    Confidence score used for CRC: 1 - r_best / r_second
     Close to 1 when one person explains the face much better than the others
     residuals has shape (k, C)
     """
@@ -49,12 +49,7 @@ def residual_ratio_score(residuals):
 
 
 class _RepresentationClassifier:
-    """Common code for SRC and CRC. Children only define _solve"""
-
-    def __init__(self, score="sci"):
-        if score not in ("sci", "residual_ratio"):
-            raise ValueError("score must be 'sci' or 'residual_ratio'.")
-        self.score = score
+    """Common code for SRC and CRC. Children only define _solve and _score"""
 
     def fit(self, X, labels):
         """X has shape (N, d), one gallery face per row. labels has shape (N,)"""
@@ -72,6 +67,10 @@ class _RepresentationClassifier:
         """Y has shape (d, k). Returns coef (N, k) and e (d, k)"""
         raise NotImplementedError
 
+    def _score(self, coef, residuals):
+        """Confidence of each match. Higher means more confident"""
+        raise NotImplementedError
+
     def explain(self, X_test):
         """Run the full decision on test faces. X_test has shape (k, d)"""
         Y = normalize_rows(np.asarray(X_test, dtype=np.float64)).T
@@ -84,14 +83,9 @@ class _RepresentationClassifier:
         ], axis=1)  # shape (k, C)
         pred = self.classes_[np.argmin(residuals, axis=1)]
 
-        if self.score == "sci":
-            score = sparsity_concentration_index(coef, self.class_masks_)
-        else:
-            score = residual_ratio_score(residuals)
-
         return {
             "pred": pred,
-            "score": score,
+            "score": self._score(coef, residuals),
             "residuals": residuals,
             "coef": coef,
             "e": e,
@@ -122,9 +116,7 @@ class SRCClassifier(_RepresentationClassifier):
     because y has unit norm
     """
 
-    def __init__(self, lam=0.005, occlusion=False, lam_e=None, n_iter=300,
-                 score="sci", e_threshold=0.1):
-        super().__init__(score=score)
+    def __init__(self, lam=0.005, occlusion=False, lam_e=None, n_iter=300, e_threshold=0.1):
         self.lam = lam
         self.occlusion = occlusion
         self.lam_e = lam_e
@@ -140,6 +132,9 @@ class SRCClassifier(_RepresentationClassifier):
         coef = fista(self.Phi_, Y, self.lam, n_iter=self.n_iter, L=self.L_)
         return coef, np.zeros_like(Y)
 
+    def _score(self, coef, residuals):
+        return sparsity_concentration_index(coef, self.class_masks_)
+
     def _occluded_fraction(self, e):
         d = e.shape[0]
         return (np.abs(e) > self.e_threshold / np.sqrt(d)).mean(axis=0)
@@ -150,10 +145,10 @@ class CRCClassifier(_RepresentationClassifier):
     Collaborative representation, Zhang et al. 2011: same idea as SRC
     but with ridge instead of the Lasso. No sparsity, much faster
     It lets us test whether the l1 relaxation really helps
+    Ridge coefficients are not sparse, so the score uses the residuals instead of the SCI
     """
 
-    def __init__(self, lam=0.01, score="residual_ratio"):
-        super().__init__(score=score)
+    def __init__(self, lam=0.01):
         self.lam = lam
 
     def _prepare(self):
@@ -161,6 +156,9 @@ class CRCClassifier(_RepresentationClassifier):
 
     def _solve(self, Y):
         return self.solver_.solve(Y), np.zeros_like(Y)
+
+    def _score(self, coef, residuals):
+        return residual_ratio_score(residuals)
 
 
 def access_decision(pred, score, tau, occluded_fraction=None, rho=None, access_list=None):

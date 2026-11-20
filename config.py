@@ -1,8 +1,5 @@
 """
-All the settings of the project live here
-
-Every script reads this file, so one change here changes the whole pipeline
-Keeping the seeds here is what makes the results reproducible
+All the settings of the project 
 """
 
 from dataclasses import dataclass, field
@@ -53,16 +50,3 @@ class Config:
     max_test_per_person: int = 15
 
     results_dir: Path = ROOT / "results"
-
-
-def quick_config() -> Config:
-    """A smaller setting to check that the code runs in a few minutes because it can be slow with the full settings"""
-    cfg = Config()
-    cfg.seeds = [0]
-    cfg.fista_iter = 150
-    cfg.max_test_per_person = 5
-    cfg.feature_dims = [30, 120]
-    cfg.occlusion_levels = [0.0, 0.3]
-    cfg.occlusion_kinds = ["block", "mask"]
-    cfg.gallery_sizes = [10, 32]
-    return cfg

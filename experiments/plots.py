@@ -2,15 +2,12 @@
 Makes every figure of the report.
 
 Usage, from the project folder:
-    python3 experiments/plots.py               # figures from the Yale B results
-    python3 experiments/plots.py --synthetic   # figures from the synthetic results
+    python3 experiments/plots.py
 
-The result figures only read the CSV files written by run_all.py.
-The example figures load a few faces to show occlusions, Robust PCA and
-one SRC decision. Everything is saved in results/<dataset>/figures/.
+The figures only read the CSV files written by run_all.py.
+Everything is saved in results/yaleb/figures/.
 """
 
-import argparse
 import sys
 from pathlib import Path
 
@@ -24,21 +21,14 @@ import pandas as pd  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from config import Config  # noqa: E402
-from src.data import load_dataset  # noqa: E402
-from src.features import PixelFeatures  # noqa: E402
-from src.occlusion import apply_occlusion  # noqa: E402
-from src.rpca import rpca  # noqa: E402
-from src.splits import split_from_config  # noqa: E402
-from src.src_classifier import SRCClassifier  # noqa: E402
 
 plt.rcParams.update({"figure.dpi": 120, "axes.spines.top": False, "axes.spines.right": False,
                      "axes.grid": True, "grid.alpha": 0.3, "font.size": 10})
 
 
 # One fixed color per method, so a method looks the same in every figure.
-COLORS = {"SRC": "#d62728", "SRC+occlusion": "#9467bd", "SRC+occlusion+RPCA": "#8c564b",
-          "CRC": "#1f77b4", "Eigenfaces+SVM": "#2ca02c", "Eigenfaces+NN": "#ff7f0e",
-          "FaceNet+NN": "#555555"}
+COLORS = {"SRC": "#d62728", "SRC+occlusion": "#9467bd", "CRC": "#1f77b4",
+          "Eigenfaces+SVM": "#2ca02c"}
 
 
 def mean_std(df, by, value="accuracy"):
@@ -52,7 +42,6 @@ def save(fig, path):
     print(f"saved {path}")
 
 
-# ----------------------------------------------------------------------------- result figures
 def plot_e1(df, out):
     fig, axes = plt.subplots(1, 3, figsize=(12, 3.6), sharey=True)
     for ax, kind in zip(axes, ["pixels", "pca", "random"]):
@@ -148,79 +137,9 @@ def plot_e6(summary, out):
     save(fig, out / "e6_time.png")
 
 
-# ----------------------------------------------------------------------------- example figures
-def plot_examples(cfg, synthetic, out):
-    images, labels, _ = load_dataset(cfg, synthetic=synthetic)
-    split = split_from_config(labels, cfg, seed=0)
-    face = images[split.emp_test_idx[:1]]
-
-    # 1. One face with each kind of occlusion.
-    settings = [("none", 0.0), ("block", 0.3), ("mask", 0.45), ("glasses", 0.2), ("pixels", 0.3)]
-    fig, axes = plt.subplots(1, len(settings), figsize=(2.2 * len(settings), 2.6))
-    for ax, (kind, level) in zip(axes, settings):
-        img = face[0] if level == 0 else apply_occlusion(face, kind, level, seed=0)[0]
-        ax.imshow(img, cmap="gray", vmin=0, vmax=1)
-        ax.set_title(kind if level == 0 else f"{kind} {int(100 * level)}%")
-        ax.axis("off")
-    save(fig, out / "example_occlusions.png")
-
-    # 2. Robust PCA on the gallery of one person: M = L + S.
-    person = split.employees[0]
-    idx = split.gallery_idx[labels[split.gallery_idx] == person]
-    feats = PixelFeatures(cfg.work_size)
-    M = feats.transform(images[idx]).T
-    L, S, info = rpca(M)
-    h, w = cfg.work_size
-    show = min(5, M.shape[1])
-    fig, axes = plt.subplots(3, show, figsize=(1.8 * show, 6))
-    for j in range(show):
-        for i, (mat, name) in enumerate([(M, "original M"), (L, "low rank L"), (S, "sparse S")]):
-            axes[i, j].imshow(mat[:, j].reshape(h, w), cmap="gray")
-            axes[i, j].axis("off")
-            if j == 0:
-                axes[i, j].set_title(name, loc="left", fontsize=9)
-    fig.suptitle(f"Robust PCA on one person, rank of L = {info['rank']}")
-    save(fig, out / "example_rpca.png")
-
-    # 3. One SRC decision with the occlusion model.
-    clf = SRCClassifier(lam=cfg.lam_src, occlusion=True, n_iter=cfg.fista_iter,
-                        e_threshold=cfg.e_pixel_threshold)
-    clf.fit(feats.transform(images[split.gallery_idx]), labels[split.gallery_idx])
-    test_img = apply_occlusion(face, "block", 0.3, seed=0)
-    res = clf.explain(feats.transform(test_img))
-    coef, e = res["coef"][:, 0], res["e"][:, 0]
-    pred = res["pred"][0]
-    rebuilt = clf.Phi_[:, clf.labels_ == pred] @ coef[clf.labels_ == pred]
-
-    fig = plt.figure(figsize=(12, 3))
-    grid = fig.add_gridspec(1, 5, width_ratios=[1, 3, 1, 1, 1])
-    ax = fig.add_subplot(grid[0])
-    ax.imshow(feats.transform(test_img)[0].reshape(h, w), cmap="gray")
-    ax.set_title("test face")
-    ax.axis("off")
-    ax = fig.add_subplot(grid[1])
-    ax.bar(np.arange(len(coef)), coef, width=1.0)
-    ax.set_title(f"coefficients x, SCI = {res['score'][0]:.2f}, true = {labels[split.emp_test_idx[0]]}, "
-                 f"predicted = {pred}")
-    ax.set_xlabel("gallery image, sorted by person")
-    for ax_i, (vec, name) in zip(range(2, 5), [(rebuilt, "rebuilt face"), (e, "error e"),
-                                               (np.abs(e) > cfg.e_pixel_threshold / np.sqrt(len(e)),
-                                                f"occluded: {100 * res['occluded_fraction'][0]:.0f}%")]):
-        ax = fig.add_subplot(grid[ax_i])
-        ax.imshow(np.asarray(vec, dtype=float).reshape(h, w), cmap="gray")
-        ax.set_title(name)
-        ax.axis("off")
-    save(fig, out / "example_decision.png")
-
-
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--synthetic", action="store_true")
-    parser.add_argument("--no-examples", action="store_true", help="skip the figures that load images")
-    args = parser.parse_args()
-
     cfg = Config()
-    res_dir = cfg.results_dir / ("synthetic" if args.synthetic else "yaleb")
+    res_dir = cfg.results_dir / "yaleb"
     out = res_dir / "figures"
     out.mkdir(parents=True, exist_ok=True)
 
@@ -241,8 +160,6 @@ def main():
         summary = pd.read_csv(files["e5s"])
         plot_e5(summary, pd.read_csv(files["e5c"]), out)
         plot_e6(summary, out)
-    if not args.no_examples:
-        plot_examples(cfg, args.synthetic, out)
 
 
 if __name__ == "__main__":
