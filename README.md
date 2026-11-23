@@ -40,6 +40,7 @@ I use the cropped version of Extended Yale B: 38 people with about 64 photos eac
 
 Unzip the dataset anywhere inside `data/`. The loader looks in every subfolder and reads the person and the light angles from the file names. The data itself is not in this repository.
 
+To add a little more difficulty, I added some onclusion on the photos.
 Yale B has no masks or glasses, so I draw them on the test photos only. A mask is a grey patch on the bottom of the face, glasses are a dark band at eye level. The gallery photos stay clean, like when an employee enrols.
 
 Dataset references: Georghiades, Belhumeur and Kriegman, PAMI 2001. Lee, Ho and Kriegman, PAMI 2005.
@@ -102,7 +103,7 @@ For the door, with SRC and the error term, 0.9% of visitors get in and about one
 
 ## Use of AI
 
-I used Claude to help me with the code for some parts.
+I used Claude to help me with the code for some parts
 
 ## References
 
